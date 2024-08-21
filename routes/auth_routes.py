@@ -1,83 +1,43 @@
-# auth_app/routes/auth_routes.py
-
 import logging
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session
-from werkzeug.security import generate_password_hash, check_password_hash
+import os
+from flask import Flask, session, redirect, url_for
+from models import db
 
-class AuthRoutes:
-    """
-    A class to handle authentication routes including login, registration, and logout.
-    """
-
+class AuthApp:
     def __init__(self):
-        """
-        Initializes the AuthRoutes with a Flask Blueprint and in-memory user storage.
-        """
-        self.blueprint = Blueprint('auth', __name__)
-        self.users = {}  # Dictionary to simulate a user database
+        self.app = Flask(__name__)
+        self.app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key')
 
-        # Configure logging
-        self.logger = logging.getLogger(__name__)
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-        self.logger.setLevel(logging.INFO)
+        self.app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+        self.app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-        # Define routes
-        self.blueprint.add_url_rule('/login', 'login', self.login, methods=['GET', 'POST'])
-        self.blueprint.add_url_rule('/signup', 'signup', self.signup, methods=['GET', 'POST'])
-        self.blueprint.add_url_rule('/logout', 'logout', self.logout)
+        db.init_app(self.app)
 
-    def login(self):
-        """
-        Handles user login. If the credentials are correct, the user is logged in and redirected to the home page.
-        """
-        if request.method == 'POST':
-            email = request.form['signin-email']
-            password = request.form['signin-password']
+        # Create the database file if it does not exist
+        with self.app.app_context():
+            if not os.path.exists('users.db'):
+                db.create_all()
 
-            user = self.users.get(email)
-            if user and check_password_hash(user['password'], password):
-                session['username'] = user['name']
-                self.logger.info(f'User {user["name"]} logged in successfully.')
-                return redirect(url_for('index'))
-            else:
-                flash('Invalid email or password')
-                self.logger.warning(f'Failed login attempt for email: {email}')
-                return redirect(url_for('auth.login'))
+        self._setup_routes()
 
-        return render_template('login.html')
+    def _setup_routes(self):
+        from auth_routes import AuthRoutes
+        auth_routes = AuthRoutes()
+        self.app.register_blueprint(auth_routes.blueprint)
 
-    def signup(self):
-        """
-        Handles new user registration. Users must provide a unique email and matching passwords.
-        """
-        if request.method == 'POST':
-            name = request.form['signup-name']
-            email = request.form['signup-email']
-            password = request.form['signup-password']
+        self.app.add_url_rule('/', 'index', self.index)
 
-            if email in self.users:
-                flash('Email already registered')
-                self.logger.warning(f'Failed registration attempt for existing email: {email}')
-                return redirect(url_for('auth.signup'))
-
-            self.users[email] = {
-                'name': name,
-                'password': generate_password_hash(password)
-            }
-            flash('Registration successful! Please log in.')
-            self.logger.info(f'New user registered with email: {email}')
+    def index(self):
+        # Redirect to login if user is not authenticated
+        if 'username' not in session:
             return redirect(url_for('auth.login'))
+        return f"Hello, {session['username']}! You are logged in."
 
-        return render_template('signup.html')
+    def run(self):
+        self.app.run(debug=True)
 
-    def logout(self):
-        """
-        Logs out the current user by clearing the session.
-        """
-        if 'username' in session:
-            self.logger.info(f'User {session["username"]} logged out.')
-        session.pop('username', None)
-        return redirect(url_for('auth.login'))
+app = AuthApp().app
+
+if __name__ == '__main__':
+    auth_app = AuthApp()
+    auth_app.run()
